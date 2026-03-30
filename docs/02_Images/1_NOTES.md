@@ -43,16 +43,28 @@ Before diving deep, understand this one flow:
 
 ```mermaid
 graph LR
-    DF["📄 Dockerfile\n(set of instructions\nyou write)"]
-    IMG["🖼️ Docker Image\n(built from Dockerfile\nread-only template)"]
-    C1["📦 Container 1\n(running instance)"]
-    C2["📦 Container 2\n(running instance)"]
-    C3["📦 Container 3\n(running instance)"]
+  DF["📄 Dockerfile\n(set of instructions\nyou write)"]
+  IMG["🖼️ Docker Image\n(built from Dockerfile\nread-only template)"]
+  C1["📦 Container 1\n(running instance)"]
+  C2["📦 Container 2\n(running instance)"]
+  C3["📦 Container 3\n(running instance)"]
 
-    DF -->|"docker build"| IMG
-    IMG -->|"docker run"| C1
-    IMG -->|"docker run"| C2
-    IMG -->|"docker run"| C3
+  DF -->|"docker build"| IMG
+  IMG -->|"docker run"| C1
+  IMG -->|"docker run"| C2
+  IMG -->|"docker run"| C3
+```
+
+```
+📄 Dockerfile
+      │
+      │  docker build
+      ▼
+🖼️  Docker Image
+      │
+      ├── docker run ──▶ 📦 Container 1
+      ├── docker run ──▶ 📦 Container 2
+      └── docker run ──▶ 📦 Container 3
 ```
 
 > 💡 **One Dockerfile → One Image → Many Containers**
@@ -242,6 +254,18 @@ graph BT
     L1 --> L2 --> L3 --> L4 --> L5
 ```
 
+```
+  [ Layer 5: ENTRYPOINT          ]  ← startup command
+                │
+  [ Layer 4: EXPOSE 8081         ]  ← port metadata
+                │
+  [ Layer 3: COPY app.jar        ]  ← your JAR file
+                │
+  [ Layer 2: WORKDIR /app        ]  ← directory setup
+                │
+  [ Layer 1: FROM openjdk:17     ]  ← base OS + Java 17
+```
+
 - Layers are **cached** — if nothing changed in a layer, Docker reuses the cached version on next build (much faster rebuilds).
 - This is why instruction **order matters** — put things that change frequently (like `COPY app.jar`) near the bottom, so Docker can reuse the stable layers above.
 
@@ -308,6 +332,19 @@ graph TD
     PR -->|"docker pull"| LOCAL
     DF -->|"docker build"| LOCAL
     LOCAL -->|"docker run"| C["📦 Container"]
+```
+
+```
+🌐 Docker Hub          🔒 Private Registry     📄 Your Dockerfile
+(docker pull mysql:8.0) (docker pull)           (docker build)
+         │                    │                       │
+         └──────────┬─────────┘                       │
+                    ▼                                 │
+         💻 Your Local Machine (image cache) ◀────────┘
+                    │
+                    │  docker run
+                    ▼
+               📦 Container
 ```
 
 **1. Docker Hub (Public Registry)**
@@ -403,6 +440,28 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
+```
+  [*]
+   │  docker create
+   ▼
+Created
+   │  docker start
+   ▼
+Running ◀──────────────── docker unpause ── Paused
+   │  docker pause                              ▲
+   └──────────────────────────────────────────▶ │
+   │  docker stop
+   ▼
+Stopped ◀──────────────── docker start (restart)
+   │  docker start
+   └──────────────▶ Running
+   │  docker rm
+   ▼
+Deleted
+   │
+  [*]
+```
+
 | State | Description |
 |-------|-------------|
 | **Created** | Container created but not yet started |
@@ -482,6 +541,22 @@ graph LR
     Host -->|"Response"| Browser
 ```
 
+```
+🌐 Browser (localhost:8081)
+         │  HTTP Request
+         ▼
+💻 Host Machine (port 8081)
+         │  -p 8081:8081 (port mapping)
+         ▼
+📦 Container (port 8081 — Spring Boot)
+         │  Response
+         ▼
+💻 Host Machine
+         │  Response
+         ▼
+🌐 Browser
+```
+
 You could also map to different ports:
 ```bash
 docker run -p 9090:8081 my-spring-app
@@ -526,6 +601,21 @@ graph TD
     RUN --> C2
     RUN --> C3
     IMG <-->|"push / pull"| HUB
+```
+
+```
+👨‍💻 Developer (writes code)
+         │
+         ▼
+📄 Dockerfile (recipe / instructions)
+         │  docker build
+         ▼
+🖼️  Docker Image (read-only blueprint) ◀──▶ 🌐 Docker Hub
+         │                                  (push / pull)
+         │  docker run
+         ├──────────▶ 📦 Container 1 (running instance)
+         ├──────────▶ 📦 Container 2 (running instance)
+         └──────────▶ 📦 Container 3 (running instance)
 ```
 
 | Concept | One-liner |
