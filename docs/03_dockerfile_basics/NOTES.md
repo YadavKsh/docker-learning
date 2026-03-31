@@ -9,7 +9,10 @@
 1. [What is a Dockerfile?](#what-is-a-dockerfile)
 2. [Dockerfile 1 — Ubuntu Image](#dockerfile-1--ubuntu-image)
 3. [Dockerfile 2 — Java App Image](#dockerfile-2--java-app-image)
-4. [Quick Reference — Common Dockerfile Instructions](#quick-reference--common-dockerfile-instructions)
+4. [Dockerfile 3 — Python App Image](#dockerfile-3--python-app-image)
+5. [Dockerfile 4 — Spring Boot App Image](#dockerfile-4--spring-boot-app-image)
+6. [🔨 docker build — Explained](#-docker-build--explained)
+7. [Quick Reference — Common Dockerfile Instructions](#quick-reference--common-dockerfile-instructions)
 
 ---
 
@@ -290,6 +293,526 @@ docker build -t my-java-app:1.0 .
 # Run the container
 docker run my-java-app:1.0
 # Output: whatever Test.java prints
+```
+
+---
+---
+
+## Dockerfile 3 — Python App Image
+
+### 📄 The Dockerfile
+
+```dockerfile
+FROM python:latest
+LABEL authors="kshit"
+
+WORKDIR /usr/src/myapp
+COPY . /usr/src/myapp
+
+CMD ["python3", "main.py"]
+```
+
+---
+
+### 🔍 Line-by-Line Breakdown
+
+---
+
+#### `FROM python:latest`
+
+```dockerfile
+FROM python:latest
+```
+
+- Sets the **base image** to the official Python image from Docker Hub.
+- `python:latest` pulls the most recent stable version of Python available.
+- This image comes with Python, `pip`, and all standard libraries pre-installed — you don't need to install Python yourself.
+- The base OS underneath is **Debian Linux** (unless you pick a variant like `alpine`).
+
+> ⚠️ **Best practice:** Avoid `latest` in real projects. Pin to a specific version like `python:3.12` so your build doesn't unexpectedly break when a new Python version is released.
+>
+> | Tag | What you get |
+> |---|---|
+> | `python:latest` | Newest version (unpredictable) |
+> | `python:3.12` | Python 3.12 specifically |
+> | `python:3.12-slim` | Python 3.12 on a minimal Debian (smaller image) |
+> | `python:3.12-alpine` | Python 3.12 on Alpine Linux (smallest, ~5MB base) |
+
+---
+
+#### `LABEL authors="kshit"`
+
+```dockerfile
+LABEL authors="kshit"
+```
+
+- Adds **metadata** to the image — purely informational, no effect on behaviour.
+- Viewable later via `docker inspect pythonimage`.
+
+---
+
+#### `WORKDIR /usr/src/myapp`
+
+```dockerfile
+WORKDIR /usr/src/myapp
+```
+
+- Sets `/usr/src/myapp` as the **working directory** inside the container.
+- All subsequent `COPY`, `RUN`, and `CMD` instructions operate relative to this path.
+- Docker creates this directory automatically if it doesn't exist.
+
+---
+
+#### `COPY . /usr/src/myapp`
+
+```dockerfile
+COPY . /usr/src/myapp
+```
+
+- Copies **everything** from your current host directory (`.`) into `/usr/src/myapp` inside the image.
+- This includes your `main.py` and any other project files (e.g., `requirements.txt`, helper modules, etc.).
+- Since `WORKDIR` is already `/usr/src/myapp`, you could also write this as just `COPY . .` — the destination `.` would resolve to the `WORKDIR`.
+
+> 💡 **Tip — install dependencies before copying source code:**  
+> If your project has a `requirements.txt`, it's better practice to copy and install it *before* copying the rest of the code. This way Docker can cache the dependency layer and won't reinstall packages on every rebuild unless `requirements.txt` actually changes:
+> ```dockerfile
+> COPY requirements.txt .
+> RUN pip install -r requirements.txt
+> COPY . .
+> ```
+
+---
+
+#### `CMD ["python3", "main.py"]`
+
+```dockerfile
+CMD ["python3", "main.py"]
+```
+
+- Defines the **default command** to execute when the container starts.
+- `python3` → the Python 3 interpreter.
+- `main.py` → your Python script to run (must exist in `WORKDIR` after the `COPY`).
+- Uses **exec form** (JSON array) — preferred because it runs `python3` directly without wrapping it in a shell.
+
+> 💡 **Shell form vs Exec form:**
+> ```dockerfile
+> CMD python3 main.py           # shell form — runs via /bin/sh -c
+> CMD ["python3", "main.py"]    # exec form  — runs directly ✅ preferred
+> ```
+> The exec form is preferred because signals like `SIGTERM` (from `docker stop`) are sent directly to `python3`, allowing clean shutdown.
+
+---
+
+### 🧅 What the Final Image Looks Like (Layers)
+
+```
+[ CMD — python3 main.py        ]  ← default startup: run main.py
+              │
+[ COPY — . → /usr/src/myapp    ]  ← new layer: your project files copied in
+              │
+[ WORKDIR — /usr/src/myapp     ]  ← sets working directory
+              │
+[ LABEL — authors="kshit"      ]  ← metadata only, no new layer
+              │
+[ FROM — python:latest         ]  ← base: Debian Linux + Python + pip
+```
+
+> 💡 Notice there's no `RUN` step here — unlike the Java image, Python is an **interpreted language**. There's no compilation step needed. Docker copies your `.py` file in and Python runs it directly at container start.
+
+---
+
+### ▶️ Build and Run
+
+```bash
+# Build the image
+docker build -t pythonimage .
+
+# Run the container
+docker run pythonimage
+# Output: whatever main.py prints
+```
+
+---
+---
+
+## Dockerfile 4 — Spring Boot App Image
+
+### 📄 Project Structure
+
+This is a real **Spring Boot REST API** project dockerized. Here's what the project contains:
+
+**`TestController.java`** — a REST controller that exposes a single GET endpoint at `/`:
+```java
+package com.docker.test.controllers;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+public class TestController {
+    @GetMapping("/")
+    public Map<String, Object> getValues() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("message", "Java API is working fine!");
+        map.put("languages", Arrays.asList("Java", "Python", "JavaScript"));
+        map.put("code", 2345);
+        return map;
+    }
+}
+```
+
+**`DockerTestApplication.java`** — the main Spring Boot entry point:
+```java
+package com.docker.test;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class DockerTestApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DockerTestApplication.class, args);
+    }
+}
+```
+
+**`Dockerfile`**:
+```dockerfile
+FROM eclipse-temurin:21-jdk-jammy
+LABEL authors="kshit"
+
+WORKDIR /usr/src/myapp
+COPY . /usr/src/myapp
+
+CMD ["java", "-jar", "DockerTest-0.0.1-SNAPSHOT.jar"]
+EXPOSE 9595
+```
+
+---
+
+### 🔍 Line-by-Line Breakdown
+
+---
+
+#### `FROM eclipse-temurin:21-jdk-jammy`
+
+```dockerfile
+FROM eclipse-temurin:21-jdk-jammy
+```
+
+- Same base image as Dockerfile 2 — Eclipse Temurin JDK 21 on Ubuntu Jammy.
+- Uses `jdk` here because Maven/Gradle (used to build the `.jar`) needs the full JDK.
+- In production, you'd ideally switch this to `jre` (smaller image) since you only need to *run* the pre-built `.jar`, not compile anything.
+
+> 💡 **Production tip — use JRE for running, JDK only for building:**
+> ```dockerfile
+> FROM eclipse-temurin:21-jre-jammy   # smaller, for running the .jar only
+> ```
+> Even better — use a **multi-stage build** (build with JDK, run with JRE). More on this below.
+
+---
+
+#### `LABEL authors="kshit"`
+
+```dockerfile
+LABEL authors="kshit"
+```
+
+- Metadata only. No effect on the running container.
+
+---
+
+#### `WORKDIR /usr/src/myapp`
+
+```dockerfile
+WORKDIR /usr/src/myapp
+```
+
+- Sets `/usr/src/myapp` as the working directory inside the container.
+- All subsequent instructions (`COPY`, `CMD`) resolve paths relative to this directory.
+
+---
+
+#### `COPY . /usr/src/myapp`
+
+```dockerfile
+COPY . /usr/src/myapp
+```
+
+- Copies **everything** from your project directory on the host into `/usr/src/myapp` inside the image.
+- This includes your pre-built JAR file (`DockerTest-0.0.1-SNAPSHOT.jar`), which is assumed to already exist in your project folder (built by Maven/Gradle before `docker build`).
+
+> ⚠️ **Important — build your JAR before running `docker build`:**  
+> Docker doesn't run Maven or Gradle for you automatically here. You must build the JAR first:
+> ```bash
+> ./mvnw clean package -DskipTests    # Maven
+> # or
+> ./gradlew bootJar                    # Gradle
+>
+> # Then build the Docker image
+> docker build -t springimage .
+> ```
+> The JAR file (`target/DockerTest-0.0.1-SNAPSHOT.jar`) must exist before the `COPY` instruction can pick it up.
+
+---
+
+#### `CMD ["java", "-jar", "DockerTest-0.0.1-SNAPSHOT.jar"]`
+
+```dockerfile
+CMD ["java", "-jar", "DockerTest-0.0.1-SNAPSHOT.jar"]
+```
+
+- Defines the **default command** to run when the container starts.
+- `java` → launches the JVM.
+- `-jar` → tells Java to run a self-contained executable JAR file.
+- `DockerTest-0.0.1-SNAPSHOT.jar` → the Spring Boot fat JAR (contains your app + all dependencies + embedded Tomcat).
+- Spring Boot packages everything into one JAR — there's no separate server to set up. Just run the JAR and the app starts on its configured port (here: `9595`).
+
+> 💡 **What is a fat JAR?**  
+> A Spring Boot fat JAR (also called an uber JAR) contains your compiled code, all Maven/Gradle dependencies, AND an embedded Tomcat server — all in a single `.jar` file. That's why you can run it with just `java -jar` and get a fully working web server.
+
+---
+
+#### `EXPOSE 9595`
+
+```dockerfile
+EXPOSE 9595
+```
+
+- **`EXPOSE`** tells Docker that the container will listen on port `9595` at runtime.
+- This is the port Spring Boot is configured to run on (set in `application.properties` via `server.port=9595`).
+- **Important:** `EXPOSE` is purely **documentation** — it does NOT actually publish the port or make it accessible from outside the container.
+- To actually access it from your browser/host, you still need the `-p` flag when running the container.
+
+> 💡 **`EXPOSE` vs `-p` — they are NOT the same:**
+>
+> | | `EXPOSE` in Dockerfile | `-p` in `docker run` |
+> |---|---|---|
+> | What it does | Documents the port the app uses | Actually maps host port → container port |
+> | Makes port accessible? | ❌ No | ✅ Yes |
+> | Required? | Optional (good practice) | Required to access from outside |
+>
+> Think of `EXPOSE` as leaving a note saying *"this app uses port 9595"*. The `-p` flag is what actually opens the door.
+
+> ⚠️ **Order matters — `EXPOSE` should come before `CMD`:**  
+> While Docker doesn't enforce this, convention is to put `EXPOSE` before `CMD`. The Dockerfile above has them swapped — functionally it works, but best practice is:
+> ```dockerfile
+> EXPOSE 9595
+> CMD ["java", "-jar", "DockerTest-0.0.1-SNAPSHOT.jar"]
+> ```
+
+---
+
+### 🌐 Running the Container — `docker run -p 9095:9595 springimage`
+
+```bash
+docker run -p 9095:9595 springimage
+```
+
+Breaking this down:
+
+```
+docker run   -p   9095 : 9595   springimage
+                   │       │
+              Host Port   Container Port
+              (your       (Spring Boot
+              machine)     inside Docker)
+```
+
+- `9595` → the port Spring Boot listens on **inside** the container (matches `EXPOSE 9595` and `server.port=9595`).
+- `9095` → the port you use to access the app **from your browser** on your host machine.
+- So hitting `http://localhost:9095/` on your browser → forwards to `9595` inside the container → Spring Boot responds.
+
+> 💡 The host port (left) and container port (right) don't have to match. Here they're intentionally different — `9095` outside, `9595` inside — which is perfectly valid and a good way to avoid port conflicts on your machine.
+
+#### What the API returns at `http://localhost:9095/`:
+```json
+{
+  "message": "Java API is working fine!",
+  "languages": ["Java", "Python", "JavaScript"],
+  "code": 2345
+}
+```
+
+This response is built by `TestController.java` — the `getValues()` method returns a `HashMap` which Spring Boot automatically serialises to JSON.
+
+---
+
+### 🧅 What the Final Image Looks Like (Layers)
+
+```
+[ CMD — java -jar DockerTest-0.0.1-SNAPSHOT.jar ]  ← starts Spring Boot app
+[ EXPOSE — 9595                                 ]  ← documents the port
+              │
+[ COPY — . → /usr/src/myapp                     ]  ← new layer: entire project copied in
+              │                                       (including the pre-built .jar)
+[ WORKDIR — /usr/src/myapp                      ]  ← sets working directory
+              │
+[ LABEL — authors="kshit"                       ]  ← metadata only
+              │
+[ FROM — eclipse-temurin:21-jdk-jammy           ]  ← base: Ubuntu Jammy + JDK 21
+```
+
+---
+
+### ▶️ Full Build and Run Workflow
+
+```bash
+# Step 1 — Build the JAR with Maven first
+./mvnw clean package -DskipTests
+# This produces: target/DockerTest-0.0.1-SNAPSHOT.jar
+
+# Step 2 — Build the Docker image
+docker build -t springimage .
+
+# Step 3 — Run the container, mapping host:9095 → container:9595
+docker run -p 9095:9595 springimage
+
+# Step 4 — Test it
+curl http://localhost:9095/
+# or open http://localhost:9095/ in your browser
+```
+
+---
+
+### 🏗️ Better Approach — Multi-Stage Build (Advanced)
+
+Right now, the image includes the full JDK (~400MB) even though at runtime you only need the JRE to run the JAR. A **multi-stage build** fixes this — compile with JDK in stage 1, run with JRE in stage 2:
+
+```dockerfile
+# Stage 1 — Build: use JDK to build the JAR
+FROM eclipse-temurin:21-jdk-jammy AS builder
+WORKDIR /app
+COPY . .
+RUN ./mvnw clean package -DskipTests
+
+# Stage 2 — Run: use lightweight JRE to just run the JAR
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+COPY --from=builder /app/target/DockerTest-0.0.1-SNAPSHOT.jar app.jar
+EXPOSE 9595
+CMD ["java", "-jar", "app.jar"]
+```
+
+> 💡 This produces a much smaller final image — the JDK, Maven, and source code never make it into the final image. Only the compiled `.jar` is copied over.
+
+---
+---
+
+## 🔨 `docker build` — Explained
+
+### The Command
+
+```bash
+docker build -t pythonimage .
+```
+
+### Breaking it down — every part:
+
+```
+docker build  -t  pythonimage  .
+    │          │       │        │
+    │          │       │        └── Build context — where to find the Dockerfile
+    │          │       │             and files to COPY (. = current directory)
+    │          │       │
+    │          │       └── The name (and optionally tag) to give the image
+    │          │            "pythonimage" → name: pythonimage, tag: latest (default)
+    │          │            "pythonimage:1.0" → name: pythonimage, tag: 1.0
+    │          │
+    │          └── -t flag → stands for "tag" — names the resulting image
+    │
+    └── The docker build command — reads Dockerfile and builds an image
+```
+
+---
+
+### What each part means in detail:
+
+#### `docker build`
+- The command that **reads a Dockerfile and builds a Docker image** from it.
+- It processes each instruction top to bottom, creating a new layer for each `RUN`, `COPY`, and `ADD`.
+
+#### `-t pythonimage`
+- `-t` stands for **tag** — it gives your image a human-readable **name** (and optionally a version).
+- Without `-t`, Docker still builds the image but assigns it no name — you'd have to reference it by its ugly image ID like `a1b2c3d4e5f6`.
+- Format: `-t name:tag`
+  ```bash
+  docker build -t pythonimage .          # name=pythonimage, tag=latest (default)
+  docker build -t pythonimage:1.0 .      # name=pythonimage, tag=1.0
+  docker build -t pythonimage:latest .   # same as first line, explicit
+  ```
+
+#### `.` (the dot)
+- This is the **build context** — the directory Docker sends to the Docker daemon to build the image.
+- `.` means the **current directory** — Docker will look for the `Dockerfile` here and make all files in this folder available for `COPY` instructions.
+- You can point to a different directory if needed:
+  ```bash
+  docker build -t pythonimage ./my-app       # Dockerfile is inside ./my-app/
+  docker build -t pythonimage -f Dockerfile.prod .   # use a custom Dockerfile name
+  ```
+
+> ⚠️ **The dot is easy to forget but mandatory.** Without it, Docker doesn't know where to find your files:
+> ```bash
+> docker build -t pythonimage     # ❌ Error: "path" argument is required
+> docker build -t pythonimage .   # ✅ Correct
+> ```
+
+---
+
+### What happens step by step when you run it:
+
+```
+docker build -t pythonimage .
+        │
+        ├── 1. Docker reads the Dockerfile in the current directory
+        │
+        ├── 2. Sends the build context (all files in .) to the Docker daemon
+        │
+        ├── 3. Executes each instruction top to bottom:
+        │         FROM   → pulls python:latest if not already local
+        │         LABEL  → adds metadata
+        │         WORKDIR → sets working directory
+        │         COPY   → copies your files into the image
+        │         CMD    → registers the default startup command
+        │
+        ├── 4. Each RUN / COPY creates a new cached layer
+        │
+        └── 5. Tags the final image as "pythonimage:latest"
+```
+
+---
+
+### Verifying the build worked:
+
+```bash
+# List local images — you should see pythonimage
+docker images
+
+# Output:
+# REPOSITORY    TAG      IMAGE ID       CREATED         SIZE
+# pythonimage   latest   f8d7e1c92b1a   2 seconds ago   1.02GB
+```
+
+---
+
+### Common `docker build` variations:
+
+```bash
+# Tag with a specific version
+docker build -t pythonimage:1.0 .
+
+# Build without cache (forces every step to re-run fresh)
+docker build --no-cache -t pythonimage .
+
+# Use a custom Dockerfile name
+docker build -f Dockerfile.prod -t pythonimage .
+
+# Pass a build-time variable
+docker build --build-arg APP_ENV=production -t pythonimage .
 ```
 
 ---
